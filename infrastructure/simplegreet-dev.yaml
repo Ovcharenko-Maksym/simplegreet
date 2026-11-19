@@ -3,6 +3,7 @@ kind: Service
 metadata:
   annotations:
     run.googleapis.com/ingress: all
+    run.googleapis.com/maxScale: '20'
   labels:
     cloud.googleapis.com/location: europe-west1
   name: simplegreet-dev
