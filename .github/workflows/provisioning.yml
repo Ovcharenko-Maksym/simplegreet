@@ -105,31 +105,47 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v3
 
+      
       - name: Recheck images and apply
         shell: bash
         run: |
+          set -euo pipefail
+
           for ENV in dev prod; do
             SERVICE="simplegreet-${ENV}"
             FILE="infrastructure/${SERVICE}.yaml"
+            TEMP_FILE="/tmp/${SERVICE}-apply.yaml"
 
             CURRENT=$(gcloud run services describe "$SERVICE" \
               --project="$PROJECT_ID" \
               --region="$REGION" \
               --format="value(spec.template.spec.containers[0].image)")
 
-            EXPECTED=$(ruby -ryaml -e \
-              'puts YAML.load_file(ARGV[0]).dig("spec","template","spec","containers",0,"image")' \
-              "$FILE")
-
-            if [[ "$CURRENT" != "$EXPECTED" ]]; then
-              echo "Image mismatch: $SERVICE"
+            if [[ -z "$CURRENT" ]]; then
+              echo "ERROR: Cannot find current image for $SERVICE"
               exit 1
             fi
 
-            gcloud run services replace "$FILE" \
+            ruby -ryaml -e '
+              data = YAML.load_file(ARGV[0])
+              data["spec"]["template"]["spec"]["containers"][0]["image"] = ARGV[2]
+              File.write(ARGV[1], YAML.dump(data))
+            ' "$FILE" "$TEMP_FILE" "$CURRENT"
+
+            echo "Checking configuration for $SERVICE"
+
+            gcloud run services replace "$TEMP_FILE" \
+              --project="$PROJECT_ID" \
+              --region="$REGION" \
+              --dry-run
+
+            echo "Applying infrastructure for $SERVICE"
+
+            gcloud run services replace "$TEMP_FILE" \
               --project="$PROJECT_ID" \
               --region="$REGION" \
               --quiet
 
-            echo "Applied: $SERVICE"
+            echo "Infrastructure applied: $SERVICE"
           done
+
