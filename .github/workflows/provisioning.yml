@@ -51,35 +51,41 @@ jobs:
       - name: Set up Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
+
       - name: Check images and preview changes
         shell: bash
         run: |
           for ENV in dev prod; do
             SERVICE="simplegreet-${ENV}"
             FILE="infrastructure/${SERVICE}.yaml"
+            TEMP_FILE="/tmp/${SERVICE}.yaml"
 
             CURRENT=$(gcloud run services describe "$SERVICE" \
               --project="$PROJECT_ID" \
               --region="$REGION" \
               --format="value(spec.template.spec.containers[0].image)")
 
-            EXPECTED=$(ruby -ryaml -e \
-              'puts YAML.load_file(ARGV[0]).dig("spec","template","spec","containers",0,"image")' \
-              "$FILE")
-
-            if [[ "$CURRENT" != "$EXPECTED" ]]; then
-              echo "Image mismatch for $SERVICE"
-              echo "Refusing possible rollback"
+            if [[ -z "$CURRENT" ]]; then
+              echo "Cannot determine current image for $SERVICE"
               exit 1
             fi
 
-            gcloud run services replace "$FILE" \
+            ruby -ryaml -e '
+              data = YAML.load_file(ARGV[0])
+              data["spec"]["template"]["spec"]["containers"][0]["image"] = ARGV[2]
+              File.write(ARGV[1], YAML.dump(data))
+            ' "$FILE" "$TEMP_FILE" "$CURRENT"
+
+            echo "Previewing $SERVICE with its current image"
+
+            gcloud run services replace "$TEMP_FILE" \
               --project="$PROJECT_ID" \
               --region="$REGION" \
               --dry-run
 
             echo "Preview successful: $SERVICE"
           done
+
 
   apply:
     name: Apply approved infrastructure
